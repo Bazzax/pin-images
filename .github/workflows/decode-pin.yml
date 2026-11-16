@@ -1,0 +1,49 @@
+name: Decode pin image
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode base64-text images into binary JPEGs
+        run: |
+          python3 << 'PY'
+          import base64, pathlib, sys
+          changed = False
+          root = pathlib.Path("pins")
+          if root.exists():
+              for p in root.glob("*.jpg"):
+                  data = p.read_bytes()
+                  if data.startswith(b"\xff\xd8\xff"):
+                      print(f"{p} already binary JPEG ({len(data)} bytes)")
+                      continue
+                  # File was stored as base64 text by the Contents API helper
+                  try:
+                      raw = base64.b64decode(data, validate=True)
+                  except Exception as e:
+                      print(f"{p} is not valid base64: {e}")
+                      sys.exit(1)
+                  if not raw.startswith(b"\xff\xd8\xff"):
+                      print(f"{p} decoded but is not a JPEG: {raw[:16]!r}")
+                      sys.exit(1)
+                  p.write_bytes(raw)
+                  print(f"{p} decoded to binary JPEG ({len(raw)} bytes)")
+                  changed = True
+          wf = pathlib.Path(".github/workflows/decode-pin.yml")
+          if wf.exists() and changed:
+              wf.unlink()
+              print("removed decode-pin.yml")
+          pathlib.Path("/tmp/changed").write_text("yes" if changed else "no")
+          PY
+          if [ "$(cat /tmp/changed)" = "yes" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "Store pin images as binary JPEGs"
+            git push
+          fi
